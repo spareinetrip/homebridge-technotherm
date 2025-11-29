@@ -67,22 +67,18 @@ export class Radiator {
   }
 
   registerCharacteristics() {
-    // Set the properties of TargetTemperature characteristic to allow temperatures down to 1°C
-    this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature)
-      .setProps({
-        minValue: 1,
-        maxValue: 40,
-        minStep: 0.5,
-      })
-      .onSet(this.setTargetTemperature.bind(this));
+  // Set the properties of TargetTemperature characteristic to allow temperatures down to 1°C
+  this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature)
+    .setProps({
+      minValue: 1,
+      maxValue: 30,
+      minStep: 0.5,
+    })
+    .onSet(this.setTargetTemperature.bind(this));
 
-
-    this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature)
-      .onSet(this.setTargetTemperature.bind(this));
-
-    this.service.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
-      .onSet(this.setTargetHeatingCoolingState.bind(this));
-  }
+  this.service.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
+    .onSet(this.setTargetHeatingCoolingState.bind(this));
+}
 
   async setTargetTemperature(value: CharacteristicValue) {
     try {
