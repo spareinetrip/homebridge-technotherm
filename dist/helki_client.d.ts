@@ -115,7 +115,7 @@ declare class HelkiClient {
     private log;
     private socketNamespace;
     constructor(apiName: string, clientId: string, clientSecret: string, username: string, password: string, log: Logger);
-    subscribeToDeviceUpdates(deviceId: string, node: Node, callback: (status: Status) => void): Promise<void>;
+    subscribeToDeviceUpdates(deviceId: string, callback: (status: Status) => void): Promise<void>;
     private auth;
     private hasTokenExpired;
     private checkRefresh;

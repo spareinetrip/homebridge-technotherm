@@ -25,21 +25,18 @@ class HelkiClient {
         });
         // Add a request interceptor
         this.axiosInstance.interceptors.request.use(config => {
-            return config; // Always return the config object
+            return config;
         }, error => {
             if (error.response) {
-                // Log any request error
                 this.log.error('Request error:', error);
             }
             return Promise.reject(error);
         });
         // Add a response interceptor
         this.axiosInstance.interceptors.response.use(response => {
-            // Log the response details
-            return response; // Always return the response object
+            return response;
         }, error => {
             if (error.response) {
-                // Log error details including the response from the server
                 this.log.error(`Error response from ${error.response.config.url}:`, error.response);
             }
             return Promise.reject(error);
@@ -50,7 +47,7 @@ class HelkiClient {
             retryCondition: (error) => axios_retry_1.default.isNetworkOrIdempotentRequestError(error) || error.response?.status === 429,
         });
     }
-    async subscribeToDeviceUpdates(deviceId, node, callback) {
+    async subscribeToDeviceUpdates(deviceId, callback) {
         await this.checkRefresh();
         const socket = (0, socket_io_client_1.default)(this.apiHost + this.socketNamespace, {
             query: {
@@ -59,12 +56,7 @@ class HelkiClient {
             },
         });
         socket.on('update', (data) => {
-            const path = data && data.head ? data.head.path : undefined;
-            // alleen updates voor de juiste node doorlaten
-            if (!path || !path.endsWith(`/${node.type}/${node.addr}/status`)) {
-                return;
-            }
-            this.log.debug(`Device ${deviceId} node ${node.addr} updated:`, data);
+            this.log.debug(`Device ${deviceId} updated:`, data);
             callback(data.body);
         });
         socket.on('connect_timeout', () => {
@@ -73,27 +65,17 @@ class HelkiClient {
         socket.on('reconnecting', async (attempt) => {
             this.log.info('Reconnecting to socket. Attempt: ', attempt);
             await this.checkRefresh();
-            // token vernieuwen in de query
-            if (!socket.io.opts.query) {
-                socket.io.opts.query = {};
-            }
             socket.io.opts.query.token = this.accessToken;
         });
         socket.on('reconnect_error', (error) => {
-            this.log.error('Socket reconnection error:', error);
-        });
-        socket.on('error', (error) => {
-            this.log.error('Socket error:', error);
+            this.log.error('Socket reconnection failed: ', error);
         });
         socket.on('connect_error', (error) => {
-            this.log.error('Socket connection error:', error);
+            this.log.error('Socket connection failed: ', error);
         });
-        socket.on('disconnect', async (reason) => {
-            this.log.debug('Socket disconnected, attempting reconnect: ', reason);
+        socket.on('disconnect', async (data) => {
+            this.log.debug('Socket disconnected, attempting reconnect: ', data);
             await this.checkRefresh();
-            if (!socket.io.opts.query) {
-                socket.io.opts.query = {};
-            }
             socket.io.opts.query.token = this.accessToken;
             socket.connect();
         });
@@ -139,7 +121,6 @@ class HelkiClient {
             'Content-Type': 'application/json',
         };
     }
-    // eslint-disable-next-line
     async apiRequest(path, method = 'GET', data) {
         await this.checkRefresh();
         const url = `${this.apiHost}/api/v2/${path}`;
@@ -173,22 +154,20 @@ class HelkiClient {
         return this.apiRequest(`devs/${deviceId}/${node.type}/${node.addr}/status`, 'GET');
     }
     async setStatus(deviceId, node, status) {
-        // Here, you might want to validate the statusArgs to ensure it only contains writable properties
         await this.apiRequest(`devs/${deviceId}/${node.type}/${node.addr}/status`, 'POST', status);
     }
     async getSetup(deviceId, node) {
         return this.apiRequest(`devs/${deviceId}/${node.type}/${node.addr}/setup`);
     }
     async setSetup(deviceId, node, setupArgs) {
-        let setupData = await this.getSetup(deviceId, node); // Assuming this returns the current setup in a directly usable format
-        setupData = { ...setupData, ...setupArgs }; // Merge with new setup arguments
+        let setupData = await this.getSetup(deviceId, node);
+        setupData = { ...setupData, ...setupArgs };
         return this.apiRequest(`devs/${deviceId}/${node.type}/${node.addr}/setup`, 'POST', setupData);
     }
     async getDeviceAwayStatus(deviceId) {
         return this.apiRequest(`devs/${deviceId}/mgr/away_status`);
     }
     async setDeviceAwayStatus(deviceId, statusArgs) {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const data = Object.fromEntries(Object.entries(statusArgs).filter(([_, v]) => v !== null));
         return this.apiRequest(`devs/${deviceId}/mgr/away_status`, 'POST', data);
     }

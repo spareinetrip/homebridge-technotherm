@@ -8,6 +8,7 @@ export declare class Radiator {
     private service;
     private node;
     constructor(platform: Technotherm, accessory: PlatformAccessory, helkiClient: HelkiClient);
+    private refreshStatus;
     onDeviceUpdate(status: Status): void;
     registerCharacteristics(): void;
     setTargetTemperature(value: CharacteristicValue): Promise<void>;
