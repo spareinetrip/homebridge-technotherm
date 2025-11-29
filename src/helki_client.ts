@@ -52,7 +52,6 @@ interface SetStatus {
 
   // Temperature settings
   stemp?: string; // Set temperature
-
 }
 
 interface Status {
@@ -141,8 +140,6 @@ interface SetupResponse {
   };
 }
 
-
-
 const MIN_TOKEN_LIFETIME = 60; // seconds
 
 class HelkiClient {
@@ -183,10 +180,9 @@ class HelkiClient {
 
     // Add a request interceptor
     this.axiosInstance.interceptors.request.use(config => {
-      return config; // Always return the config object
+      return config;
     }, error => {
       if (error.response) {
-        // Log any request error
         this.log.error('Request error:', error);
       }
       return Promise.reject(error);
@@ -194,11 +190,9 @@ class HelkiClient {
 
     // Add a response interceptor
     this.axiosInstance.interceptors.response.use(response => {
-      // Log the response details
-      return response; // Always return the response object
+      return response;
     }, error => {
       if (error.response) {
-        // Log error details including the response from the server
         this.log.error(`Error response from ${error.response.config.url}:`, error.response);
       }
       return Promise.reject(error);
@@ -207,79 +201,56 @@ class HelkiClient {
     axiosRetry(this.axiosInstance, {
       retries: 5,
       retryDelay: axiosRetry.exponentialDelay,
-      retryCondition: (error) => axiosRetry.isNetworkOrIdempotentRequestError(error) || error.response?.status === 429,
+      retryCondition: (error) =>
+        axiosRetry.isNetworkOrIdempotentRequestError(error) || error.response?.status === 429,
     });
   }
 
-  async subscribeToDeviceUpdates(
-  deviceId: string,
-  node: Node,
-  callback: (status: Status) => void,
-): Promise<void> {
-  await this.checkRefresh();
-
-  const socket = io(this.apiHost + this.socketNamespace, {
-    query: {
-      token: this.accessToken,
-      dev_id: deviceId,
-    },
-  });
-
-  socket.on('update', (data) => {
-    const path = data && data.head ? (data.head.path as string) : undefined;
-
-    // alleen updates voor de juiste node doorlaten
-    if (!path || !path.endsWith(`/${node.type}/${node.addr}/status`)) {
-      return;
-    }
-
-    this.log.debug(`Device ${deviceId} node ${node.addr} updated:`, data);
-
-    callback(data.body as Status);
-  });
-
-  socket.on('connect_timeout', () => {
-    this.log.warn('Socket connection timed out');
-  });
-
-  socket.on('reconnecting', async (attempt) => {
-    this.log.info('Reconnecting to socket. Attempt: ', attempt);
-
+  async subscribeToDeviceUpdates(deviceId: string, callback: (status: Status) => void): Promise<void> {
     await this.checkRefresh();
-    // token vernieuwen in de query
-    if (!socket.io.opts.query) {
-      socket.io.opts.query = {};
-    }
-    (socket.io.opts.query as Record<string, unknown>).token = this.accessToken;
-  });
 
-  socket.on('reconnect_error', (error) => {
-    this.log.error('Socket reconnection error:', error);
-  });
+    const socket = io(this.apiHost + this.socketNamespace, {
+      query: {
+        token: this.accessToken,
+        dev_id: deviceId,
+      },
+    });
 
-  socket.on('error', (error) => {
-    this.log.error('Socket error:', error);
-  });
+    socket.on('update', (data) => {
+      this.log.debug(`Device ${deviceId} updated:`, data);
+      callback(data.body);
+    });
 
-  socket.on('connect_error', (error) => {
-    this.log.error('Socket connection error:', error);
-  });
+    socket.on('connect_timeout', () => {
+      this.log.warn('Socket connection timed out');
+    });
 
-  socket.on('disconnect', async (reason) => {
-    this.log.debug('Socket disconnected, attempting reconnect: ', reason);
+    socket.on('reconnecting', async (attempt) => {
+      this.log.info('Reconnecting to socket. Attempt: ', attempt);
+      await this.checkRefresh();
+      socket.io.opts.query.token = this.accessToken;
+    });
 
-    await this.checkRefresh();
-    if (!socket.io.opts.query) {
-      socket.io.opts.query = {};
-    }
-    (socket.io.opts.query as Record<string, unknown>).token = this.accessToken;
-    socket.connect();
-  });
+    socket.on('reconnect_error', (error) => {
+      this.log.error('Socket reconnection failed: ', error);
+    });
 
-  socket.on('connect', () => {
-    this.log.debug('Connected to socket');
-  });
-}
+    socket.on('connect_error', (error) => {
+      this.log.error('Socket connection failed: ', error);
+    });
+
+    socket.on('disconnect', async (data) => {
+      this.log.debug('Socket disconnected, attempting reconnect: ', data);
+
+      await this.checkRefresh();
+      socket.io.opts.query.token = this.accessToken;
+      socket.connect();
+    });
+
+    socket.on('connect', () => {
+      this.log.debug('Connected to socket');
+    });
+  }
 
   private async auth(): Promise<void> {
     this.log.info(`Authenticating via ${this.apiHost}`);
@@ -327,7 +298,6 @@ class HelkiClient {
     };
   }
 
-  // eslint-disable-next-line
   private async apiRequest<T>(path: string, method: 'GET' | 'POST' = 'GET', data?: any): Promise<T> {
     await this.checkRefresh();
     const url = `${this.apiHost}/api/v2/${path}`;
@@ -365,7 +335,6 @@ class HelkiClient {
   }
 
   public async setStatus(deviceId: string, node: Node, status: SetStatus): Promise<void> {
-    // Here, you might want to validate the statusArgs to ensure it only contains writable properties
     await this.apiRequest<void>(`devs/${deviceId}/${node.type}/${node.addr}/status`, 'POST', status);
   }
 
@@ -374,8 +343,8 @@ class HelkiClient {
   }
 
   public async setSetup(deviceId: string, node: Node, setupArgs: SetupArgs): Promise<unknown> {
-    let setupData = await this.getSetup(deviceId, node); // Assuming this returns the current setup in a directly usable format
-    setupData = { ...setupData, ...setupArgs }; // Merge with new setup arguments
+    let setupData = await this.getSetup(deviceId, node);
+    setupData = { ...setupData, ...setupArgs };
     return this.apiRequest(`devs/${deviceId}/${node.type}/${node.addr}/setup`, 'POST', setupData);
   }
 
@@ -384,7 +353,6 @@ class HelkiClient {
   }
 
   public async setDeviceAwayStatus(deviceId: string, statusArgs: StatusArgs): Promise<unknown> {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const data = Object.fromEntries(Object.entries(statusArgs).filter(([_, v]) => v !== null));
     return this.apiRequest(`devs/${deviceId}/mgr/away_status`, 'POST', data);
   }
