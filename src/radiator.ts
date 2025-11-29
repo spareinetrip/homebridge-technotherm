@@ -94,6 +94,12 @@ export class Radiator {
 
     this.service.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
       .onSet(this.setTargetHeatingCoolingState.bind(this));
+
+    // Current temperature met 0.1°C precisie
+    this.service.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
+      .setProps({
+        minStep: 0.1,
+      });
   }
 
   async setTargetTemperature(value: CharacteristicValue) {
