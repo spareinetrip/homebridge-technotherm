@@ -211,53 +211,75 @@ class HelkiClient {
     });
   }
 
-  async subscribeToDeviceUpdates(deviceId: string, callback: (status: Status) => void): Promise<void> {
+  async subscribeToDeviceUpdates(
+  deviceId: string,
+  node: Node,
+  callback: (status: Status) => void,
+): Promise<void> {
+  await this.checkRefresh();
+
+  const socket = io(this.apiHost + this.socketNamespace, {
+    query: {
+      token: this.accessToken,
+      dev_id: deviceId,
+    },
+  });
+
+  socket.on('update', (data) => {
+    const path = data && data.head ? (data.head.path as string) : undefined;
+
+    // alleen updates voor de juiste node doorlaten
+    if (!path || !path.endsWith(`/${node.type}/${node.addr}/status`)) {
+      return;
+    }
+
+    this.log.debug(`Device ${deviceId} node ${node.addr} updated:`, data);
+
+    callback(data.body as Status);
+  });
+
+  socket.on('connect_timeout', () => {
+    this.log.warn('Socket connection timed out');
+  });
+
+  socket.on('reconnecting', async (attempt) => {
+    this.log.info('Reconnecting to socket. Attempt: ', attempt);
+
     await this.checkRefresh();
+    // token vernieuwen in de query
+    if (!socket.io.opts.query) {
+      socket.io.opts.query = {};
+    }
+    (socket.io.opts.query as Record<string, unknown>).token = this.accessToken;
+  });
 
-    const socket = io(this.apiHost + this.socketNamespace, {
-      query: {
-        token: this.accessToken,
-        dev_id: deviceId,
-      },
-    });
+  socket.on('reconnect_error', (error) => {
+    this.log.error('Socket reconnection error:', error);
+  });
 
-    socket.on('update', (data) => {
-      this.log.debug(`Device ${deviceId} updated:`, data);
+  socket.on('error', (error) => {
+    this.log.error('Socket error:', error);
+  });
 
-      callback(data.body);
-    });
+  socket.on('connect_error', (error) => {
+    this.log.error('Socket connection error:', error);
+  });
 
-    socket.on('connect_timeout', () => {
-      this.log.warn('Socket connection timed out');
-    });
+  socket.on('disconnect', async (reason) => {
+    this.log.debug('Socket disconnected, attempting reconnect: ', reason);
 
-    socket.on('reconnecting', async (attempt) => {
-      this.log.info('Reconnecting to socket. Attempt: ', attempt);
+    await this.checkRefresh();
+    if (!socket.io.opts.query) {
+      socket.io.opts.query = {};
+    }
+    (socket.io.opts.query as Record<string, unknown>).token = this.accessToken;
+    socket.connect();
+  });
 
-      await this.checkRefresh();
-      socket.io.opts.query.token = this.accessToken;
-    });
-
-    socket.on('reconnect_error', (error) => {
-      this.log.error('Socket reconnection failed: ', error);
-    });
-
-    socket.on('connect_error', (error) => {
-      this.log.error('Socket connection failed: ', error);
-    });
-
-    socket.on('disconnect', async (data) => {
-      this.log.debug('Socket disconnected, attempting reconnect: ', data);
-
-      await this.checkRefresh();
-      socket.io.opts.query.token = this.accessToken;
-      socket.connect();
-    });
-
-    socket.on('connect', () => {
-      this.log.debug('Connected to socket');
-    });
-  }
+  socket.on('connect', () => {
+    this.log.debug('Connected to socket');
+  });
+}
 
   private async auth(): Promise<void> {
     this.log.info(`Authenticating via ${this.apiHost}`);
