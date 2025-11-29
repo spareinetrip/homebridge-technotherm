@@ -25,7 +25,11 @@ export class Radiator {
 
     this.registerCharacteristics();
 
-    this.helkiClient.subscribeToDeviceUpdates(this.accessory.context.device.dev_id, this.onDeviceUpdate.bind(this));
+    this.helkiClient.subscribeToDeviceUpdates(
+    this.accessory.context.device.dev_id,
+    this.node,
+    this.onDeviceUpdate.bind(this),
+      );
   }
 
   onDeviceUpdate(status: Status): void {
