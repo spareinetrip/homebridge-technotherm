@@ -34,7 +34,7 @@ export class Radiator {
       this.refreshStatus().catch(error => {
         this.platform.log.error('Failed to refresh status:', error);
       });
-    }, 60000); // elke 60 seconden
+    }, 15000); // elke 60 seconden
   }
 
   private async refreshStatus(): Promise<void> {
