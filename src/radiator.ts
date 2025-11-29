@@ -25,11 +25,22 @@ export class Radiator {
 
     this.registerCharacteristics();
 
-    this.helkiClient.subscribeToDeviceUpdates(
-    this.accessory.context.device.dev_id,
-    this.node,
-    this.onDeviceUpdate.bind(this),
-      );
+    // Initieel ophalen + periodieke refresh per radiator
+    this.refreshStatus().catch(error => {
+      this.platform.log.error('Failed to refresh initial status:', error);
+    });
+
+    setInterval(() => {
+      this.refreshStatus().catch(error => {
+        this.platform.log.error('Failed to refresh status:', error);
+      });
+    }, 60000); // elke 60 seconden
+  }
+
+  private async refreshStatus(): Promise<void> {
+    const deviceId = this.accessory.context.device.dev_id;
+    const status = await this.helkiClient.getStatus(deviceId, this.node);
+    this.onDeviceUpdate(status);
   }
 
   onDeviceUpdate(status: Status): void {
@@ -61,24 +72,29 @@ export class Radiator {
         break;
     }
 
-    const currentHeatingCoolingState = status.active ? this.platform.Characteristic.CurrentHeatingCoolingState.HEAT :
-      this.platform.Characteristic.CurrentHeatingCoolingState.OFF;
-    this.service.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState, currentHeatingCoolingState);
+    const currentHeatingCoolingState = status.active
+      ? this.platform.Characteristic.CurrentHeatingCoolingState.HEAT
+      : this.platform.Characteristic.CurrentHeatingCoolingState.OFF;
+
+    this.service.updateCharacteristic(
+      this.platform.Characteristic.CurrentHeatingCoolingState,
+      currentHeatingCoolingState,
+    );
   }
 
   registerCharacteristics() {
-  // Set the properties of TargetTemperature characteristic to allow temperatures down to 1°C
-  this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature)
-    .setProps({
-      minValue: 1,
-      maxValue: 30,
-      minStep: 0.5,
-    })
-    .onSet(this.setTargetTemperature.bind(this));
+    // Temperatuurbereik
+    this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature)
+      .setProps({
+        minValue: 1,
+        maxValue: 30,
+        minStep: 0.5,
+      })
+      .onSet(this.setTargetTemperature.bind(this));
 
-  this.service.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
-    .onSet(this.setTargetHeatingCoolingState.bind(this));
-}
+    this.service.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
+      .onSet(this.setTargetHeatingCoolingState.bind(this));
+  }
 
   async setTargetTemperature(value: CharacteristicValue) {
     try {
@@ -88,6 +104,7 @@ export class Radiator {
         mode: 'manual',
         units: 'C',
       });
+      await this.refreshStatus();
     } catch (error) {
       this.platform.log.error('Failed to set target temperature:', error);
     }
@@ -103,8 +120,10 @@ export class Radiator {
     } else {
       mode = 'off';
     }
+
     try {
-      await this.helkiClient.setStatus(this.accessory.context.device.dev_id, this.node, { mode: mode });
+      await this.helkiClient.setStatus(this.accessory.context.device.dev_id, this.node, { mode });
+      await this.refreshStatus();
     } catch (error) {
       this.platform.log.error('Failed to set target heating/cooling state:', error);
     }
