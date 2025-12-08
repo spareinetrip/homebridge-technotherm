@@ -11,6 +11,10 @@ export declare class Technotherm implements DynamicPlatformPlugin {
     readonly Service: typeof Service;
     readonly Characteristic: typeof Characteristic;
     readonly accessories: PlatformAccessory[];
+    private helkiClient;
+    private httpServer;
+    private radiatorModeSwitch;
+    private radiatorModeSwitchAccessory;
     constructor(log: Logger, config: PlatformConfig, api: API);
     /**
      * This function is invoked when homebridge restores cached accessories from disk at startup.
@@ -21,5 +25,21 @@ export declare class Technotherm implements DynamicPlatformPlugin {
      * Authenticate with the API to obtain an access token and fetch the list of devices.
      */
     discoverDevices(): Promise<void>;
+    /**
+     * Start HTTP server to allow external devices (like Shelly) to control all radiators
+     */
+    private startHttpServer;
+    /**
+     * Create the radiator mode switch accessory
+     */
+    private createRadiatorModeSwitch;
+    /**
+     * Set all radiators to AUTO mode
+     */
+    private setAllRadiatorsToAuto;
+    /**
+     * Set all radiators to MANUAL mode at 17°C
+     */
+    private setAllRadiatorsToManual;
 }
 //# sourceMappingURL=platform.d.ts.map

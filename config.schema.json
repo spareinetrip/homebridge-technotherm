@@ -48,6 +48,19 @@
         "required": true,
         "default": "vdivdi",
         "description": "Client Secret is repurposed from an existing web client or app and shared amongst all users."
+      },
+      "httpServerPort": {
+        "title": "HTTP Server Port",
+        "type": "number",
+        "required": false,
+        "default": 8080,
+        "description": "Port for the HTTP server that allows external devices (like Shelly) to control all radiators. Set to 0 to disable."
+      },
+      "shellyIp": {
+        "title": "Shelly IP Address",
+        "type": "string",
+        "required": false,
+        "description": "IP address of your Shelly Wall Display (e.g., 192.168.1.22). Optional - if provided, the HomeKit switch will sync with the Shelly switch state."
       }
     },
     "required": [

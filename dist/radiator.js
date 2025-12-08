@@ -6,6 +6,7 @@ class Radiator {
         this.platform = platform;
         this.accessory = accessory;
         this.helkiClient = helkiClient;
+        this.isUpdating = false; // Prevent recursive updates
         this.node = this.accessory.context.node;
         this.accessory.getService(this.platform.Service.AccessoryInformation)
             .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Technotherm')
@@ -15,24 +16,39 @@ class Radiator {
             this.accessory.addService(this.platform.Service.Thermostat);
         this.service.setCharacteristic(this.platform.Characteristic.Name, this.accessory.displayName);
         this.registerCharacteristics();
-        // Initieel ophalen + periodieke refresh per radiator
+        // Initial status fetch
         this.refreshStatus().catch(error => {
             this.platform.log.error('Failed to refresh initial status:', error);
         });
+        // Subscribe to real-time updates via Socket.IO for immediate sync
+        const deviceId = this.accessory.context.device.dev_id;
+        this.helkiClient.subscribeToDeviceUpdates(deviceId, (status) => {
+            this.platform.log.debug(`Real-time update received for ${this.accessory.displayName}`);
+            this.onDeviceUpdate(status);
+        }).catch(error => {
+            this.platform.log.warn(`Failed to subscribe to real-time updates for ${this.accessory.displayName}, falling back to polling:`, error);
+        });
+        // Fallback polling (more frequent for better sync)
         setInterval(() => {
             this.refreshStatus().catch(error => {
                 this.platform.log.error('Failed to refresh status:', error);
             });
-        }, 15000); // elke 60 seconden
+        }, 10000); // Every 10 seconds (reduced from 15 for faster sync)
     }
     async refreshStatus() {
+        if (this.isUpdating) {
+            return; // Prevent recursive updates during manual changes
+        }
         const deviceId = this.accessory.context.device.dev_id;
         const status = await this.helkiClient.getStatus(deviceId, this.node);
         this.onDeviceUpdate(status);
     }
     onDeviceUpdate(status) {
+        // Always allow updates from Socket.IO (external changes like AUTO mode)
+        // The isUpdating flag only prevents recursive updates from our own refreshStatus() calls
         const currentTemperature = status.mtemp ? parseFloat(status.mtemp) : 0;
         const targetTemperature = status.stemp ? parseFloat(status.stemp) : 0;
+        // Update all characteristics immediately
         this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, currentTemperature);
         this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, targetTemperature);
         switch (status.mode) {
@@ -63,22 +79,45 @@ class Radiator {
             .onSet(this.setTargetTemperature.bind(this));
         this.service.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
             .onSet(this.setTargetHeatingCoolingState.bind(this));
+        // Current temperature met 0.1°C precisie
+        this.service.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
+            .setProps({
+            minStep: 0.1,
+        });
     }
     async setTargetTemperature(value) {
+        if (this.isUpdating) {
+            return; // Prevent recursive updates
+        }
+        this.isUpdating = true;
+        const targetTemp = Number(value);
+        const stemp = targetTemp.toFixed(1);
         try {
-            const stemp = Number(value).toFixed(1);
+            // Optimistically update the characteristic immediately
+            this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, targetTemp);
+            // Set the status on the device
             await this.helkiClient.setStatus(this.accessory.context.device.dev_id, this.node, {
                 stemp: stemp,
                 mode: 'manual',
                 units: 'C',
             });
+            // Refresh to get the actual state (Socket.IO will also update it)
             await this.refreshStatus();
         }
         catch (error) {
             this.platform.log.error('Failed to set target temperature:', error);
+            // Revert on error
+            this.refreshStatus().catch(() => { });
+        }
+        finally {
+            this.isUpdating = false;
         }
     }
     async setTargetHeatingCoolingState(value) {
+        if (this.isUpdating) {
+            return; // Prevent recursive updates
+        }
+        this.isUpdating = true;
         let mode;
         if (value === this.platform.Characteristic.TargetHeatingCoolingState.HEAT) {
             mode = 'manual';
@@ -90,11 +129,20 @@ class Radiator {
             mode = 'off';
         }
         try {
+            // Optimistically update the characteristic immediately
+            this.service.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, value);
+            // Set the status on the device
             await this.helkiClient.setStatus(this.accessory.context.device.dev_id, this.node, { mode });
+            // Refresh to get the actual state (Socket.IO will also update it)
             await this.refreshStatus();
         }
         catch (error) {
             this.platform.log.error('Failed to set target heating/cooling state:', error);
+            // Revert on error
+            this.refreshStatus().catch(() => { });
+        }
+        finally {
+            this.isUpdating = false;
         }
     }
 }

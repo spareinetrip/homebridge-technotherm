@@ -7,6 +7,7 @@ export declare class Radiator {
     private readonly helkiClient;
     private service;
     private node;
+    private isUpdating;
     constructor(platform: Technotherm, accessory: PlatformAccessory, helkiClient: HelkiClient);
     private refreshStatus;
     onDeviceUpdate(status: Status): void;

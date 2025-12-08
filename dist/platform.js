@@ -1,9 +1,45 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Technotherm = void 0;
 const helki_client_1 = require("./helki_client");
+const http = __importStar(require("http"));
+const url = __importStar(require("url"));
 const settings_1 = require("./settings");
 const radiator_1 = require("./radiator");
+const radiator_mode_switch_1 = require("./radiator_mode_switch");
 /**
  * Technotherm
  * This class is the main constructor for your plugin, this is where you should
@@ -18,6 +54,10 @@ class Technotherm {
         this.Characteristic = this.api.hap.Characteristic;
         // this is used to track restored cached accessories
         this.accessories = [];
+        this.helkiClient = null;
+        this.httpServer = null;
+        this.radiatorModeSwitch = null;
+        this.radiatorModeSwitchAccessory = null;
         this.log.debug('Finished initializing platform:', this.config.name);
         // When this event is fired it means Homebridge has restored all cached accessories from disk.
         // Dynamic Platform plugins should only register new accessories after this event was fired,
@@ -27,6 +67,8 @@ class Technotherm {
             log.debug('Executed didFinishLaunching callback');
             // run the method to discover / register your devices as accessories
             this.discoverDevices();
+            // Start HTTP server if configured
+            this.startHttpServer();
         });
     }
     /**
@@ -35,8 +77,15 @@ class Technotherm {
      */
     configureAccessory(accessory) {
         this.log.info('Loading accessory from cache:', accessory.displayName);
-        // add the restored accessory to the accessories cache so we can track if it has already been registered
-        this.accessories.push(accessory);
+        // Check if this is the radiator mode switch
+        if (accessory.UUID === this.api.hap.uuid.generate('RADIATOR-MODE-SWITCH')) {
+            this.radiatorModeSwitchAccessory = accessory;
+            // Will be initialized after helkiClient is ready
+        }
+        else {
+            // add the restored accessory to the accessories cache so we can track if it has already been registered
+            this.accessories.push(accessory);
+        }
     }
     /**
      * Authenticate with the API to obtain an access token and fetch the list of devices.
@@ -48,6 +97,8 @@ class Technotherm {
         while (true) { // Continue indefinitely
             try {
                 const helki = new helki_client_1.HelkiClient(this.config.apiName, this.config.clientId, this.config.clientSecret, this.config.username, this.config.password, this.log);
+                // Store helki client for HTTP endpoints
+                this.helkiClient = helki;
                 const groups = await helki.getGroupedDevices();
                 // Filter on home if specified
                 const home = groups.find(home => home.name === this.config.home);
@@ -104,6 +155,16 @@ class Technotherm {
                 }
                 // If successful, reset delay
                 backoffDelay = 1000;
+                // Create or restore the radiator mode switch accessory
+                // If it was restored from cache, initialize it now
+                if (this.radiatorModeSwitchAccessory && !this.radiatorModeSwitch) {
+                    this.log.info('Initializing restored radiator mode switch');
+                    this.radiatorModeSwitch = new radiator_mode_switch_1.RadiatorModeSwitch(this, this.radiatorModeSwitchAccessory, helki);
+                }
+                else if (!this.radiatorModeSwitchAccessory) {
+                    // Create new switch
+                    this.createRadiatorModeSwitch(helki);
+                }
                 break;
             }
             catch (error) {
@@ -119,6 +180,164 @@ class Technotherm {
                     break;
                 }
             }
+        }
+    }
+    /**
+     * Start HTTP server to allow external devices (like Shelly) to control all radiators
+     */
+    startHttpServer() {
+        const port = this.config.httpServerPort || 8080;
+        if (port === 0) {
+            this.log.debug('HTTP server disabled (port set to 0)');
+            return;
+        }
+        this.httpServer = http.createServer((req, res) => {
+            const parsedUrl = url.parse(req.url || '', true);
+            const path = parsedUrl.pathname || '';
+            const method = req.method || 'GET';
+            // Enable CORS for local network access
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+            if (method === 'OPTIONS') {
+                res.writeHead(200);
+                res.end();
+                return;
+            }
+            // Handle different endpoints
+            if (path === '/set-all-auto' && method === 'GET') {
+                this.setAllRadiatorsToAuto(res);
+            }
+            else if (path === '/set-all-manual' && method === 'GET') {
+                this.setAllRadiatorsToManual(res);
+            }
+            else if (path === '/health' && method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'ok', radiators: this.accessories.length }));
+            }
+            else {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Not found' }));
+            }
+        });
+        this.httpServer.listen(port, () => {
+            this.log.info(`HTTP server started on port ${port}`);
+            this.log.info(`Available endpoints:`);
+            this.log.info(`  GET http://<homebridge-ip>:${port}/set-all-auto - Set all radiators to AUTO mode`);
+            this.log.info(`  GET http://<homebridge-ip>:${port}/set-all-manual - Set all radiators to MANUAL mode at 17°C`);
+            this.log.info(`  GET http://<homebridge-ip>:${port}/health - Health check`);
+        });
+        this.httpServer.on('error', (error) => {
+            if (error.code === 'EADDRINUSE') {
+                this.log.error(`Port ${port} is already in use. HTTP server not started.`);
+            }
+            else {
+                this.log.error(`HTTP server error: ${error.message}`);
+            }
+        });
+    }
+    /**
+     * Create the radiator mode switch accessory
+     */
+    createRadiatorModeSwitch(helki) {
+        const switchUUID = this.api.hap.uuid.generate('RADIATOR-MODE-SWITCH');
+        const existingSwitch = this.accessories.find(acc => acc.UUID === switchUUID);
+        if (existingSwitch) {
+            this.log.info('Restoring radiator mode switch from cache');
+            this.radiatorModeSwitchAccessory = existingSwitch;
+            this.radiatorModeSwitch = new radiator_mode_switch_1.RadiatorModeSwitch(this, existingSwitch, helki);
+        }
+        else {
+            this.log.info('Creating new radiator mode switch');
+            const switchAccessory = new this.api.platformAccessory('Radiator Mode', switchUUID);
+            this.radiatorModeSwitchAccessory = switchAccessory;
+            this.radiatorModeSwitch = new radiator_mode_switch_1.RadiatorModeSwitch(this, switchAccessory, helki);
+            this.api.registerPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [switchAccessory]);
+            this.accessories.push(switchAccessory);
+        }
+    }
+    /**
+     * Set all radiators to AUTO mode
+     */
+    async setAllRadiatorsToAuto(res) {
+        if (!this.helkiClient) {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Helki client not initialized' }));
+            return;
+        }
+        try {
+            const results = await Promise.allSettled(this.accessories.map(async (accessory) => {
+                const device = accessory.context.device;
+                const node = accessory.context.node;
+                await this.helkiClient.setStatus(device.dev_id, node, { mode: 'auto' });
+                return { name: accessory.displayName, status: 'success' };
+            }));
+            const successful = results.filter(r => r.status === 'fulfilled').length;
+            const failed = results.filter(r => r.status === 'rejected').length;
+            this.log.info(`Set ${successful} radiators to AUTO mode${failed > 0 ? `, ${failed} failed` : ''}`);
+            // Sync HomeKit switch state
+            if (this.radiatorModeSwitch) {
+                await this.radiatorModeSwitch.updateState(true);
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                success: true,
+                message: `Set ${successful} radiators to AUTO mode`,
+                successful,
+                failed,
+            }));
+        }
+        catch (error) {
+            this.log.error('Failed to set all radiators to AUTO:', error);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error',
+            }));
+        }
+    }
+    /**
+     * Set all radiators to MANUAL mode at 17°C
+     */
+    async setAllRadiatorsToManual(res) {
+        if (!this.helkiClient) {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Helki client not initialized' }));
+            return;
+        }
+        try {
+            const results = await Promise.allSettled(this.accessories.map(async (accessory) => {
+                const device = accessory.context.device;
+                const node = accessory.context.node;
+                await this.helkiClient.setStatus(device.dev_id, node, {
+                    mode: 'manual',
+                    stemp: '17.0',
+                    units: 'C',
+                });
+                return { name: accessory.displayName, status: 'success' };
+            }));
+            const successful = results.filter(r => r.status === 'fulfilled').length;
+            const failed = results.filter(r => r.status === 'rejected').length;
+            this.log.info(`Set ${successful} radiators to MANUAL mode at 17°C${failed > 0 ? `, ${failed} failed` : ''}`);
+            // Sync HomeKit switch state
+            if (this.radiatorModeSwitch) {
+                await this.radiatorModeSwitch.updateState(false);
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                success: true,
+                message: `Set ${successful} radiators to MANUAL mode at 17°C`,
+                successful,
+                failed,
+            }));
+        }
+        catch (error) {
+            this.log.error('Failed to set all radiators to MANUAL:', error);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error',
+            }));
         }
     }
 }
