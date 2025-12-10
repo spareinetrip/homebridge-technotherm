@@ -152,6 +152,14 @@ export class RadiatorModeSwitch {
       acc => acc.context.device && acc.context.node && acc.UUID !== this.accessory.UUID
     );
 
+    // Mark radiators as forced BEFORE setting status to prevent race conditions
+    radiatorAccessories.forEach(accessory => {
+      const radiator = this.platform.getRadiatorInstance(accessory.UUID);
+      if (radiator) {
+        radiator.markForcedTo19C();
+      }
+    });
+
     const results = await Promise.allSettled(
       radiatorAccessories.map(async (accessory) => {
         const device = accessory.context.device;
@@ -162,12 +170,6 @@ export class RadiatorModeSwitch {
           units: 'C',
         });
         
-        // Mark radiator as forced to 19°C to prevent Socket.IO/polling from overwriting
-        const radiator = this.platform.getRadiatorInstance(accessory.UUID);
-        if (radiator) {
-          radiator.markForcedTo19C();
-        }
-        
         return { name: accessory.displayName, status: 'success' };
       })
     );
@@ -177,6 +179,8 @@ export class RadiatorModeSwitch {
 
     if (failed > 0) {
       this.platform.log.warn(`Set ${successful} radiators to MANUAL mode at 19°C, ${failed} failed`);
+    } else {
+      this.platform.log.info(`Successfully set ${successful} radiators to MANUAL mode at 19°C (forced flag active)`);
     }
   }
 

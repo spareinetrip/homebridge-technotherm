@@ -48,6 +48,23 @@ export class Radiator {
         this.platform.log.error('Failed to refresh status:', error);
       });
     }, 10000); // Every 10 seconds (reduced from 15 for faster sync)
+
+    // Periodically enforce 19°C if forced flag is active (every 5 seconds for first minute)
+    setInterval(() => {
+      if (this.forcedTo19C) {
+        const now = Date.now();
+        if (now - this.forcedTo19CTimestamp < 60000) {
+          const currentTarget = this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature).value as number;
+          if (currentTarget !== 19.0) {
+            this.platform.log.info(`${this.accessory.displayName}: Enforcing 19°C (forced flag active, current: ${currentTarget}°C)`);
+            this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, 19.0);
+          }
+        } else {
+          // Force flag expired
+          this.forcedTo19C = false;
+        }
+      }
+    }, 5000); // Check every 5 seconds
   }
 
   private async refreshStatus(): Promise<void> {
@@ -73,18 +90,29 @@ export class Radiator {
       const now = Date.now();
       // Force flag expires after 60 seconds to allow normal operation
       if (now - this.forcedTo19CTimestamp < 60000) {
+        const originalTemp = targetTemperature;
         targetTemperature = 19.0;
-        this.platform.log.debug(`${this.accessory.displayName}: Preserving 19°C (forced from AUTO switch), ignoring API value ${status.stemp}`);
+        this.platform.log.info(`${this.accessory.displayName}: Preserving 19°C (forced from AUTO switch), ignoring API value ${status.stemp}°C (age: ${Math.round((now - this.forcedTo19CTimestamp) / 1000)}s)`);
       } else {
         // Force flag expired, clear it
         this.forcedTo19C = false;
         this.platform.log.debug(`${this.accessory.displayName}: Force flag expired, using API value ${status.stemp}`);
       }
+    } else if (this.forcedTo19C && status.mode !== 'manual') {
+      // If forced but not in manual mode, clear the flag
+      this.forcedTo19C = false;
+      this.platform.log.debug(`${this.accessory.displayName}: Cleared force flag (not in manual mode)`);
     }
 
     // Update all characteristics immediately
     this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, currentTemperature);
-    this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, targetTemperature);
+    
+    // Only update TargetTemperature if it's different from current value to avoid triggering unnecessary updates
+    // But always update if forced to ensure 19°C is set
+    const currentTargetTemp = this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature).value as number;
+    if (targetTemperature !== currentTargetTemp || this.forcedTo19C) {
+      this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, targetTemperature);
+    }
 
     switch (status.mode) {
       case 'auto':
@@ -147,10 +175,15 @@ export class Radiator {
     const targetTemp = Number(value);
     const stemp = targetTemp.toFixed(1);
 
-    // Clear forced flag when user manually changes temperature (allows override)
+    // If forced to 19°C and user is trying to set it to something else, allow override
+    // But if they're setting it to 19°C, don't clear the flag (might be from our own update)
     if (this.forcedTo19C && targetTemp !== 19.0) {
       this.forcedTo19C = false;
-      this.platform.log.debug(`${this.accessory.displayName}: User manually changed temperature to ${targetTemp}°C, clearing force flag`);
+      this.platform.log.info(`${this.accessory.displayName}: User manually changed temperature from 19°C to ${targetTemp}°C, clearing force flag`);
+    } else if (this.forcedTo19C && targetTemp === 19.0) {
+      // User is setting to 19°C - this might be from our forced update, so don't clear the flag
+      // But also don't prevent the API call in case they really want to set it
+      this.platform.log.debug(`${this.accessory.displayName}: Temperature set to 19°C (forced flag active, allowing API call)`);
     }
 
     try {
@@ -214,11 +247,14 @@ export class Radiator {
   /**
    * Mark this radiator as forced to 19°C from AUTO switch
    * This prevents Socket.IO/polling updates from overwriting the temperature
+   * Immediately updates HomeKit to 19°C to prevent any race conditions
    */
   markForcedTo19C(): void {
     this.forcedTo19C = true;
     this.forcedTo19CTimestamp = Date.now();
-    this.platform.log.debug(`${this.accessory.displayName}: Marked as forced to 19°C from AUTO switch`);
+    // Immediately update HomeKit to 19°C to prevent race conditions with Socket.IO
+    this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, 19.0);
+    this.platform.log.info(`${this.accessory.displayName}: Marked as forced to 19°C from AUTO switch, immediately set HomeKit to 19°C`);
   }
 
   /**

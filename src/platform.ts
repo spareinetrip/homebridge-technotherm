@@ -272,8 +272,13 @@ export class Technotherm implements DynamicPlatformPlugin {
     }
 
     try {
+      // Get all radiator accessories (exclude the switch itself)
+      const radiatorAccessories = this.accessories.filter(
+        acc => acc.context.device && acc.context.node
+      );
+
       const results = await Promise.allSettled(
-        this.accessories.map(async (accessory) => {
+        radiatorAccessories.map(async (accessory) => {
           const device = accessory.context.device;
           const node = accessory.context.node;
           await this.helkiClient!.setStatus(device.dev_id, node, { mode: 'auto' });
@@ -326,8 +331,21 @@ export class Technotherm implements DynamicPlatformPlugin {
     }
 
     try {
+      // Get all radiator accessories (exclude the switch itself)
+      const radiatorAccessories = this.accessories.filter(
+        acc => acc.context.device && acc.context.node
+      );
+
+      // Mark radiators as forced BEFORE setting status to prevent race conditions
+      radiatorAccessories.forEach(accessory => {
+        const radiator = this.radiatorInstances.get(accessory.UUID);
+        if (radiator) {
+          radiator.markForcedTo19C();
+        }
+      });
+
       const results = await Promise.allSettled(
-        this.accessories.map(async (accessory) => {
+        radiatorAccessories.map(async (accessory) => {
           const device = accessory.context.device;
           const node = accessory.context.node;
           await this.helkiClient!.setStatus(device.dev_id, node, {
@@ -336,12 +354,6 @@ export class Technotherm implements DynamicPlatformPlugin {
             units: 'C',
           });
           
-          // Mark radiator as forced to 19°C to prevent Socket.IO/polling from overwriting
-          const radiator = this.radiatorInstances.get(accessory.UUID);
-          if (radiator) {
-            radiator.markForcedTo19C();
-          }
-          
           return { name: accessory.displayName, status: 'success' };
         })
       );
@@ -349,7 +361,7 @@ export class Technotherm implements DynamicPlatformPlugin {
       const successful = results.filter(r => r.status === 'fulfilled').length;
       const failed = results.filter(r => r.status === 'rejected').length;
 
-      this.log.info(`Set ${successful} radiators to MANUAL mode at 19°C${failed > 0 ? `, ${failed} failed` : ''}`);
+      this.log.info(`Set ${successful} radiators to MANUAL mode at 19°C${failed > 0 ? `, ${failed} failed` : ''} (forced flag active)`);
 
       // Sync HomeKit switch state
       if (this.radiatorModeSwitch) {
