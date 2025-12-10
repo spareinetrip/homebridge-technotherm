@@ -124,6 +124,13 @@ export class RadiatorModeSwitch {
         const device = accessory.context.device;
         const node = accessory.context.node;
         await this.helkiClient.setStatus(device.dev_id, node, { mode: 'auto' });
+        
+        // Clear forced flag when switching to AUTO mode
+        const radiator = this.platform.getRadiatorInstance(accessory.UUID);
+        if (radiator) {
+          radiator.clearForcedTo19C();
+        }
+        
         return { name: accessory.displayName, status: 'success' };
       })
     );
@@ -154,6 +161,13 @@ export class RadiatorModeSwitch {
           stemp: '19.0',
           units: 'C',
         });
+        
+        // Mark radiator as forced to 19°C to prevent Socket.IO/polling from overwriting
+        const radiator = this.platform.getRadiatorInstance(accessory.UUID);
+        if (radiator) {
+          radiator.markForcedTo19C();
+        }
+        
         return { name: accessory.displayName, status: 'success' };
       })
     );
@@ -234,6 +248,7 @@ export class RadiatorModeSwitch {
 
   /**
    * Sync switch state from Shelly switch
+   * When Shelly switch changes, actually set the radiators (not just update HomeKit switch)
    */
   async syncStateFromShelly(shellyIp: string): Promise<void> {
     if (this.isUpdating) {
@@ -247,11 +262,27 @@ export class RadiatorModeSwitch {
       const isShellyOn = switchState.output === true;
 
       if (isShellyOn !== this.currentState) {
-        this.platform.log.info(`Shelly switch state changed to ${isShellyOn ? 'ON' : 'OFF'}, syncing HomeKit switch`);
-        this.currentState = isShellyOn;
+        this.platform.log.info(`Shelly switch state changed to ${isShellyOn ? 'ON' : 'OFF'}, setting radiators accordingly`);
         this.isUpdating = true;
-        this.service.updateCharacteristic(this.platform.Characteristic.On, this.currentState);
-        this.isUpdating = false;
+        
+        try {
+          if (isShellyOn) {
+            // Shelly switch turned ON -> Set all radiators to AUTO
+            await this.setAllRadiatorsToAuto();
+            this.currentState = true;
+          } else {
+            // Shelly switch turned OFF -> Set all radiators to MANUAL at 19°C
+            await this.setAllRadiatorsToManual();
+            this.currentState = false;
+          }
+          
+          // Update HomeKit switch state
+          this.service.updateCharacteristic(this.platform.Characteristic.On, this.currentState);
+        } catch (error) {
+          this.platform.log.error('Failed to set radiators from Shelly switch change:', error);
+        } finally {
+          this.isUpdating = false;
+        }
       }
     } catch (error) {
       // Silently fail - Shelly might be unreachable

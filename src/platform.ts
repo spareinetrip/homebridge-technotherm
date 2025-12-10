@@ -18,6 +18,14 @@ export class Technotherm implements DynamicPlatformPlugin {
 
   // this is used to track restored cached accessories
   public readonly accessories: PlatformAccessory[] = [];
+  private radiatorInstances: Map<string, Radiator> = new Map(); // Track Radiator instances by UUID
+
+  /**
+   * Get a Radiator instance by accessory UUID
+   */
+  public getRadiatorInstance(uuid: string): Radiator | undefined {
+    return this.radiatorInstances.get(uuid);
+  }
   private helkiClient: HelkiClient | null = null;
   private httpServer: http.Server | null = null;
   private radiatorModeSwitch: RadiatorModeSwitch | null = null;
@@ -117,7 +125,8 @@ export class Technotherm implements DynamicPlatformPlugin {
                   }
 
                   this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
-                  new Radiator(this, existingAccessory, helki);
+                  const radiator = new Radiator(this, existingAccessory, helki);
+                  this.radiatorInstances.set(existingAccessory.UUID, radiator);
                 }
               } else {
                 const accessory = new this.api.platformAccessory(accessoryName, accessoryUUID);
@@ -126,12 +135,14 @@ export class Technotherm implements DynamicPlatformPlugin {
                 accessory.context.home = group.name;
                 if (home !== undefined && home.name === group.name) {
                   this.log.info('Adding new accessory:', accessoryName);
-                  new Radiator(this, accessory, helki);
+                  const radiator = new Radiator(this, accessory, helki);
+                  this.radiatorInstances.set(accessory.UUID, radiator);
                   this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
                 }
                 if (home === undefined) {
                   this.log.info('Adding new accessory:', accessoryName);
-                  new Radiator(this, accessory, helki);
+                  const radiator = new Radiator(this, accessory, helki);
+                  this.radiatorInstances.set(accessory.UUID, radiator);
                   this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
                 }
               }
@@ -266,6 +277,13 @@ export class Technotherm implements DynamicPlatformPlugin {
           const device = accessory.context.device;
           const node = accessory.context.node;
           await this.helkiClient!.setStatus(device.dev_id, node, { mode: 'auto' });
+          
+          // Clear forced flag when switching to AUTO mode
+          const radiator = this.radiatorInstances.get(accessory.UUID);
+          if (radiator) {
+            radiator.clearForcedTo19C();
+          }
+          
           return { name: accessory.displayName, status: 'success' };
         })
       );
@@ -317,6 +335,13 @@ export class Technotherm implements DynamicPlatformPlugin {
             stemp: '19.0',
             units: 'C',
           });
+          
+          // Mark radiator as forced to 19°C to prevent Socket.IO/polling from overwriting
+          const radiator = this.radiatorInstances.get(accessory.UUID);
+          if (radiator) {
+            radiator.markForcedTo19C();
+          }
+          
           return { name: accessory.displayName, status: 'success' };
         })
       );

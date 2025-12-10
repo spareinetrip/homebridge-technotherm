@@ -6,6 +6,8 @@ export class Radiator {
   private service: Service;
   private node: Node;
   private isUpdating: boolean = false; // Prevent recursive updates
+  private forcedTo19C: boolean = false; // Track if radiator was forced to 19°C from AUTO switch
+  private forcedTo19CTimestamp: number = 0; // Timestamp when forced to 19°C (expires after 60 seconds)
 
   constructor(
     private readonly platform: Technotherm,
@@ -63,7 +65,22 @@ export class Radiator {
     // The isUpdating flag only prevents recursive updates from our own refreshStatus() calls
     
     const currentTemperature = status.mtemp ? parseFloat(status.mtemp) : 0;
-    const targetTemperature = status.stemp ? parseFloat(status.stemp) : 0;
+    let targetTemperature = status.stemp ? parseFloat(status.stemp) : 0;
+
+    // If radiator was forced to 19°C from AUTO switch, preserve that temperature
+    // even if API returns a different value (prevents Socket.IO/polling from overwriting)
+    if (this.forcedTo19C && status.mode === 'manual') {
+      const now = Date.now();
+      // Force flag expires after 60 seconds to allow normal operation
+      if (now - this.forcedTo19CTimestamp < 60000) {
+        targetTemperature = 19.0;
+        this.platform.log.debug(`${this.accessory.displayName}: Preserving 19°C (forced from AUTO switch), ignoring API value ${status.stemp}`);
+      } else {
+        // Force flag expired, clear it
+        this.forcedTo19C = false;
+        this.platform.log.debug(`${this.accessory.displayName}: Force flag expired, using API value ${status.stemp}`);
+      }
+    }
 
     // Update all characteristics immediately
     this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, currentTemperature);
@@ -130,6 +147,12 @@ export class Radiator {
     const targetTemp = Number(value);
     const stemp = targetTemp.toFixed(1);
 
+    // Clear forced flag when user manually changes temperature (allows override)
+    if (this.forcedTo19C && targetTemp !== 19.0) {
+      this.forcedTo19C = false;
+      this.platform.log.debug(`${this.accessory.displayName}: User manually changed temperature to ${targetTemp}°C, clearing force flag`);
+    }
+
     try {
       // Optimistically update the characteristic immediately
       this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, targetTemp);
@@ -164,6 +187,8 @@ export class Radiator {
       mode = 'manual';
     } else if (value === this.platform.Characteristic.TargetHeatingCoolingState.AUTO) {
       mode = 'auto';
+      // Clear forced flag when switching to AUTO mode
+      this.forcedTo19C = false;
     } else {
       mode = 'off';
     }
@@ -183,6 +208,26 @@ export class Radiator {
       this.refreshStatus().catch(() => {});
     } finally {
       this.isUpdating = false;
+    }
+  }
+
+  /**
+   * Mark this radiator as forced to 19°C from AUTO switch
+   * This prevents Socket.IO/polling updates from overwriting the temperature
+   */
+  markForcedTo19C(): void {
+    this.forcedTo19C = true;
+    this.forcedTo19CTimestamp = Date.now();
+    this.platform.log.debug(`${this.accessory.displayName}: Marked as forced to 19°C from AUTO switch`);
+  }
+
+  /**
+   * Clear the forced to 19°C flag
+   */
+  clearForcedTo19C(): void {
+    if (this.forcedTo19C) {
+      this.forcedTo19C = false;
+      this.platform.log.debug(`${this.accessory.displayName}: Cleared forced to 19°C flag`);
     }
   }
 }
