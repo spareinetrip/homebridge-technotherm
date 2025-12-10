@@ -120,7 +120,7 @@ export class Radiator {
       targetTemperature = 30;
     }
     
-    const currentTargetTemp = this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature).value as number;
+    // Reuse currentTargetTemp already declared above
     if (targetTemperature !== currentTargetTemp || this.forcedTo19C) {
       this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, targetTemperature);
     }
