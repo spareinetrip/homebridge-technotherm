@@ -6,7 +6,7 @@ import axios from 'axios';
 /**
  * Switch accessory that controls all radiators' mode
  * ON = AUTO mode
- * OFF = MANUAL mode at 17°C
+ * OFF = MANUAL mode at 19°C
  */
 export class RadiatorModeSwitch {
   private service: Service;
@@ -76,10 +76,10 @@ export class RadiatorModeSwitch {
         this.currentState = true;
         this.platform.log.info('HomeKit switch turned ON - Set all radiators to AUTO mode');
       } else {
-        // Switch OFF -> Set all radiators to MANUAL at 17°C
+        // Switch OFF -> Set all radiators to MANUAL at 19°C
         await this.setAllRadiatorsToManual();
         this.currentState = false;
-        this.platform.log.info('HomeKit switch turned OFF - Set all radiators to MANUAL mode at 17°C');
+        this.platform.log.info('HomeKit switch turned OFF - Set all radiators to MANUAL mode at 19°C');
       }
 
       // Also update Shelly switch if configured
@@ -137,7 +137,7 @@ export class RadiatorModeSwitch {
   }
 
   /**
-   * Set all radiators to MANUAL mode at 17°C
+   * Set all radiators to MANUAL mode at 19°C
    */
   private async setAllRadiatorsToManual(): Promise<void> {
     // Get all radiator accessories (exclude the switch itself)
@@ -151,7 +151,7 @@ export class RadiatorModeSwitch {
         const node = accessory.context.node;
         await this.helkiClient.setStatus(device.dev_id, node, {
           mode: 'manual',
-          stemp: '17.0',
+          stemp: '19.0',
           units: 'C',
         });
         return { name: accessory.displayName, status: 'success' };
@@ -162,7 +162,7 @@ export class RadiatorModeSwitch {
     const failed = results.filter(r => r.status === 'rejected').length;
 
     if (failed > 0) {
-      this.platform.log.warn(`Set ${successful} radiators to MANUAL mode at 17°C, ${failed} failed`);
+      this.platform.log.warn(`Set ${successful} radiators to MANUAL mode at 19°C, ${failed} failed`);
     }
   }
 

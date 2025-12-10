@@ -216,7 +216,7 @@ export class Technotherm implements DynamicPlatformPlugin {
       this.log.info(`HTTP server started on port ${port}`);
       this.log.info(`Available endpoints:`);
       this.log.info(`  GET http://<homebridge-ip>:${port}/set-all-auto - Set all radiators to AUTO mode`);
-      this.log.info(`  GET http://<homebridge-ip>:${port}/set-all-manual - Set all radiators to MANUAL mode at 17°C`);
+      this.log.info(`  GET http://<homebridge-ip>:${port}/set-all-manual - Set all radiators to MANUAL mode at 19°C`);
       this.log.info(`  GET http://<homebridge-ip>:${port}/health - Health check`);
     });
 
@@ -298,7 +298,7 @@ export class Technotherm implements DynamicPlatformPlugin {
   }
 
   /**
-   * Set all radiators to MANUAL mode at 17°C
+   * Set all radiators to MANUAL mode at 19°C
    */
   private async setAllRadiatorsToManual(res: http.ServerResponse) {
     if (!this.helkiClient) {
@@ -314,7 +314,7 @@ export class Technotherm implements DynamicPlatformPlugin {
           const node = accessory.context.node;
           await this.helkiClient!.setStatus(device.dev_id, node, {
             mode: 'manual',
-            stemp: '17.0',
+            stemp: '19.0',
             units: 'C',
           });
           return { name: accessory.displayName, status: 'success' };
@@ -324,7 +324,7 @@ export class Technotherm implements DynamicPlatformPlugin {
       const successful = results.filter(r => r.status === 'fulfilled').length;
       const failed = results.filter(r => r.status === 'rejected').length;
 
-      this.log.info(`Set ${successful} radiators to MANUAL mode at 17°C${failed > 0 ? `, ${failed} failed` : ''}`);
+      this.log.info(`Set ${successful} radiators to MANUAL mode at 19°C${failed > 0 ? `, ${failed} failed` : ''}`);
 
       // Sync HomeKit switch state
       if (this.radiatorModeSwitch) {
@@ -334,7 +334,7 @@ export class Technotherm implements DynamicPlatformPlugin {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         success: true,
-        message: `Set ${successful} radiators to MANUAL mode at 17°C`,
+        message: `Set ${successful} radiators to MANUAL mode at 19°C`,
         successful,
         failed,
       }));
