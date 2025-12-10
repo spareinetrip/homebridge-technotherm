@@ -310,6 +310,19 @@ class HelkiClient {
       this.log.debug(`API ${method} request for ${url}${apiData} => ${JSON.stringify(response.data)}`);
       return response.data;
     } catch (error: unknown) {
+      // Handle axios errors with more detail
+      if (axios.isAxiosError(error)) {
+        if (error.code === 'ECONNABORTED' || error.response?.status === 408) {
+          throw new Error(`API request to ${path} timed out: ${error.message}`);
+        }
+        if (error.response) {
+          throw new Error(`API request to ${path} failed with status ${error.response.status}: ${error.response.statusText}`);
+        }
+        if (error.request) {
+          throw new Error(`API request to ${path} failed: No response received (${error.message})`);
+        }
+        throw new Error(`API request to ${path} failed: ${error.message}`);
+      }
       if (error instanceof Error) {
         throw new Error(`API request to ${path} failed: ${error.message}`);
       }

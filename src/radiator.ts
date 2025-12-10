@@ -82,7 +82,9 @@ export class Radiator {
     // The isUpdating flag only prevents recursive updates from our own refreshStatus() calls
     
     const currentTemperature = status.mtemp ? parseFloat(status.mtemp) : 0;
-    let targetTemperature = status.stemp ? parseFloat(status.stemp) : 0;
+    // Get current target temperature as fallback to avoid setting invalid 0 value
+    const currentTargetTemp = this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature).value as number;
+    let targetTemperature = status.stemp ? parseFloat(status.stemp) : (currentTargetTemp || 1);
 
     // If radiator was forced to 19°C from AUTO switch, preserve that temperature
     // even if API returns a different value (prevents Socket.IO/polling from overwriting)
@@ -109,6 +111,15 @@ export class Radiator {
     
     // Only update TargetTemperature if it's different from current value to avoid triggering unnecessary updates
     // But always update if forced to ensure 19°C is set
+    // Ensure targetTemperature is within valid range (1-30) before setting
+    if (targetTemperature < 1) {
+      this.platform.log.warn(`${this.accessory.displayName}: Invalid target temperature ${targetTemperature}°C, using minimum value 1°C`);
+      targetTemperature = 1;
+    } else if (targetTemperature > 30) {
+      this.platform.log.warn(`${this.accessory.displayName}: Invalid target temperature ${targetTemperature}°C, using maximum value 30°C`);
+      targetTemperature = 30;
+    }
+    
     const currentTargetTemp = this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature).value as number;
     if (targetTemperature !== currentTargetTemp || this.forcedTo19C) {
       this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, targetTemperature);
